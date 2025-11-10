@@ -1,9 +1,9 @@
 import sys
-from PyQt6.QtCore import Qt, QStringListModel, QUrl
+from PyQt6.QtCore import Qt, QStringListModel, QUrl, QSize
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QPushButton, QLineEdit,
     QCompleter, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QFileDialog, QLabel, QHeaderView
+    QFileDialog, QLabel, QListWidget, QListWidgetItem, QHeaderView
 )
 import requests
 import xlsxwriter
@@ -13,7 +13,7 @@ from datetime import datetime
 import sqlite3
 
 
-# Единый мягкий зелёный стиль
+# =============== ЕДИНЫЙ СТИЛЬ ДЛЯ ВСЕГО ПРИЛОЖЕНИЯ ===============
 COMMON_STYLE = """
 QWidget {
     background-color: #f0f9f1;
@@ -29,11 +29,6 @@ QLineEdit {
     color: #1b5e20;
     selection-background-color: #a5d6a7;
 }
-QLineEdit:read-only {
-    background-color: #c8e6c9;
-    font-weight: bold;
-    border-style: dashed;
-}
 QPushButton {
     background-color: #66bb6a;
     color: white;
@@ -46,7 +41,7 @@ QPushButton {
 QPushButton:hover {
     background-color: #4caf50;
 }
-QListView {
+QListView, QCompleter QListView {
     background-color: #ffffff;
     color: #1b5e20;
     border: 1px solid #81c784;
@@ -66,7 +61,20 @@ QHeaderView::section {
 }
 QLabel {
     color: #388e3c;
-    font-size: 13px;
+}
+QListWidget {
+    background-color: #ffffff;
+    border: 1px solid #c8e6c9;
+    border-radius: 8px;
+    padding: 4px;
+}
+QListWidget::item {
+    padding: 8px;
+    border-bottom: 1px solid #e0e0e0;
+}
+QListWidget::item:selected {
+    background-color: #c8e6c9;
+    color: #1b5e20;
 }
 """
 
@@ -75,7 +83,7 @@ def internet_connected(url='http://www.google.com', timeout=5):
     try:
         requests.head(url, timeout=timeout)
         return True
-    except requests.ConnectionError:
+    except Exception:
         return False
 
 
@@ -84,9 +92,6 @@ def get_currency_rates_nn():
     conn = sqlite3.connect('curs_database.db')
     cursor = conn.cursor()
     data = cursor.execute("SELECT date FROM curss").fetchall()
-    if not data:
-        conn.close()
-        return {}, ""
     bstdt = sorted(data, key=lambda x: x[0], reverse=True)[0][0]
     curss = cursor.execute("SELECT title, curs FROM curss WHERE date = ?", (bstdt,)).fetchall()
     conn.close()
@@ -122,6 +127,86 @@ def get_currency_rates():
     return currency_rates
 
 
+# =============== Кастомный виджет для истории ===============
+class wd1(QWidget):
+    def __init__(self, arg2, arg3):
+        super().__init__()
+        self.setStyleSheet("background: transparent; border: none;")
+        layout = QHBoxLayout()
+        date_label = QLabel(arg2)
+        date_label.setStyleSheet("font-weight: bold; color: #388e3c;")
+        rate_label = QLabel(arg3)
+        rate_label.setStyleSheet("color: #1b5e20;")
+        layout.addWidget(date_label)
+        layout.addStretch()
+        layout.addWidget(rate_label)
+        layout.setContentsMargins(10, 5, 10, 5)
+        self.setLayout(layout)
+
+
+# =============== Окно истории курсов ===============
+class Wn3(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setStyleSheet(COMMON_STYLE)
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle("История курсов")
+        self.setGeometry(1000, 250, 500, 500)
+
+        self.lnval = QLineEdit()
+        self.lnval.setPlaceholderText("Введите код валюты (например, USD)")
+
+        self.btn = QPushButton("Показать историю")
+        self.lstw = QListWidget()
+
+        # Автодополнение
+        self.curs = list(valcurss.keys())
+        self.ln = QStringListModel(self.curs, self)
+        self.compl = QCompleter()
+        self.compl.setModel(self.ln)
+        self.compl.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.lnval.setCompleter(self.compl)
+
+        hb = QHBoxLayout()
+        hb.addWidget(self.lnval)
+        hb.addWidget(self.btn)
+
+        vb = QVBoxLayout()
+        vb.addLayout(hb)
+        vb.addWidget(self.lstw)
+        vb.setContentsMargins(15, 15, 15, 15)
+        self.setLayout(vb)
+
+        self.btn.clicked.connect(self.btnk)
+
+    def btnk(self):
+        self.lstw.clear()
+        val = self.lnval.text().strip().upper()
+        if not val:
+            return
+        conn = sqlite3.connect('curs_database.db')
+        cursor = conn.cursor()
+        rows = cursor.execute("SELECT curs, date FROM curss WHERE title = ? ORDER BY date DESC", (val,)).fetchall()
+        conn.close()
+        if not rows:
+            item = QListWidgetItem("Нет данных")
+            self.lstw.addItem(item)
+            return
+        seen = set()
+        for curs, date in rows:
+            if (curs, date) in seen:
+                continue
+            seen.add((curs, date))
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(0, 60))
+            self.lstw.addItem(item)
+            widget = wd1(date, f"{curs:.6f} RUB")
+            self.lstw.setItemWidget(item, widget)
+
+
+# =============== Окно таблицы всех курсов ===============
 class Wn2(QWidget):
     def __init__(self):
         super().__init__()
@@ -129,7 +214,7 @@ class Wn2(QWidget):
         self.initUI()
 
     def initUI(self):
-        self.setWindowTitle("Курс валют")
+        self.setWindowTitle("Все курсы")
         self.setGeometry(850, 250, 550, 500)
 
         self.uplbtn = QPushButton("Скачать как .xlsx")
@@ -152,25 +237,22 @@ class Wn2(QWidget):
         self.uplbtn.clicked.connect(self.show_save_file_dialog)
 
     def tblz(self):
-        self.tbl.setRowCount(len(valcurss))
-        c = 0
-        for key in sorted(valcurss.keys()):
-            self.tbl.setItem(c, 0, QTableWidgetItem(key))
-            self.tbl.setItem(c, 1, QTableWidgetItem(f"{valcurss[key]:.6f}"))
-            c += 1
+        keys = sorted(valcurss.keys())
+        self.tbl.setRowCount(len(keys))
+        for i, key in enumerate(keys):
+            self.tbl.setItem(i, 0, QTableWidgetItem(key))
+            self.tbl.setItem(i, 1, QTableWidgetItem(f"{valcurss[key]:.6f}"))
 
     def xlsxxx(self, arg="Curss", path="/Users/denis/Downloads/"):
-        a = valcurss
         os.makedirs(path, exist_ok=True)
         workbook = xlsxwriter.Workbook(f"{path}{arg}.xlsx")
         worksheet = workbook.add_worksheet()
         worksheet.write(0, 0, "Валюта")
         worksheet.write(0, 1, "Курс (RUB)")
-        row = 1
-        for key in sorted(a):
+        keys = sorted(valcurss.keys())
+        for row, key in enumerate(keys, start=1):
             worksheet.write(row, 0, key)
-            worksheet.write(row, 1, a[key])
-            row += 1
+            worksheet.write(row, 1, valcurss[key])
         workbook.close()
 
     def show_save_file_dialog(self):
@@ -182,21 +264,19 @@ class Wn2(QWidget):
         )
         if url.isEmpty():
             return
-
         file_path = url.toLocalFile()
         if not file_path.endswith('.xlsx'):
             file_path += '.xlsx'
-
         dir_path = os.path.dirname(file_path) + os.sep
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         self.xlsxxx(arg=base_name, path=dir_path)
 
 
+# =============== Основное окно конвертера ===============
 class kalc(QWidget):
     def __init__(self):
         super().__init__()
         self.setStyleSheet(COMMON_STYLE)
-        # Загрузка сохранённых значений
         self.v1 = self.v2 = self.f1 = ""
         try:
             with open("vals.txt", "r", encoding="utf-8") as f:
@@ -204,7 +284,7 @@ class kalc(QWidget):
                 self.v2 = f.readline().rstrip()
                 self.f1 = f.readline().rstrip()
         except FileNotFoundError:
-            pass  # Файл не существует — используем пустые значения
+            pass
         self.initUI()
 
     def initUI(self):
@@ -239,34 +319,32 @@ class kalc(QWidget):
         self.btswp.setFixedWidth(50)
         self.btswp.clicked.connect(self.swp)
 
-        # Левая колонка
-        left_layout = QVBoxLayout()
-        left_layout.addWidget(QLabel("Сумма:"))
-        left_layout.addWidget(self.frln)
-        left_layout.addWidget(QLabel("Результат:"))
-        left_layout.addWidget(self.scln)
+        left = QVBoxLayout()
+        left.addWidget(QLabel("Сумма:"))
+        left.addWidget(self.frln)
+        left.addWidget(QLabel("Результат:"))
+        left.addWidget(self.scln)
 
-        # Правая колонка
-        right_layout = QVBoxLayout()
-        right_layout.addWidget(QLabel("Из валюты:"))
-        right_layout.addWidget(self.val1)
-        right_layout.addWidget(self.btswp)
-        right_layout.addWidget(QLabel("В валюту:"))
-        right_layout.addWidget(self.val2)
-        right_layout.addWidget(self.btn)
+        right = QVBoxLayout()
+        right.addWidget(QLabel("Из валюты:"))
+        right.addWidget(self.val1)
+        right.addWidget(self.btswp)
+        right.addWidget(QLabel("В валюту:"))
+        right.addWidget(self.val2)
+        right.addWidget(self.btn)
 
-        main_layout = QHBoxLayout()
-        main_layout.addLayout(left_layout)
-        main_layout.addSpacing(30)
-        main_layout.addLayout(right_layout)
+        main = QHBoxLayout()
+        main.addLayout(left)
+        main.addSpacing(30)
+        main.addLayout(right)
 
         layout = QVBoxLayout()
-        layout.addLayout(main_layout)
+        layout.addLayout(main)
         layout.setContentsMargins(25, 25, 25, 25)
 
         if not bl:
-            self.lbl = QLabel(f"Последнее обновление курсов: {bstd}")
-            layout.addWidget(self.lbl)
+            lbl = QLabel(f"Последнее обновление: {bstd}")
+            layout.addWidget(lbl)
 
         self.setLayout(layout)
 
@@ -277,36 +355,35 @@ class kalc(QWidget):
                 f.write(f"{self.val2.text().upper()}\n")
                 f.write(f"{self.frln.text()}")
         except Exception:
-            pass  # Игнорируем ошибки записи
+            pass
         event.accept()
 
     def getvl(self):
-        vl1 = self.val1.text().strip().upper()
-        vl2 = self.val2.text().strip().upper()
-        if not vl1 or not vl2:
+        v1 = self.val1.text().strip().upper()
+        v2 = self.val2.text().strip().upper()
+        if not v1 or not v2:
             self.scln.setText("Укажите обе валюты")
             return
-        if vl1 not in valcurss or vl2 not in valcurss:
+        if v1 not in valcurss or v2 not in valcurss:
             self.scln.setText("Неизвестная валюта")
             return
         try:
             val = eval(self.frln.text(), {"__builtins__": {}})
-            result = val * valcurss[vl1] / valcurss[vl2]
-            self.scln.setText(f"{result:.6f}")
+            res = val * valcurss[v1] / valcurss[v2]
+            self.scln.setText(f"{res:.6f}")
         except Exception as e:
             self.scln.setText(f"Ошибка: {e}")
 
     def swp(self):
-        v1 = self.val1.text().strip()
-        v2 = self.val2.text().strip()
+        v1, v2 = self.val1.text().strip(), self.val2.text().strip()
         self.val1.setText(v2)
         self.val2.setText(v1)
 
 
+# =============== Запуск приложения ===============
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    # Инициализация БД
     conn = sqlite3.connect('curs_database.db')
     cursor = conn.cursor()
     cursor.execute('''
@@ -324,7 +401,6 @@ if __name__ == "__main__":
     conn.commit()
     conn.close()
 
-    # Загрузка курсов
     bl = internet_connected()
     if bl:
         valcurss = get_currency_rates()
@@ -337,7 +413,9 @@ if __name__ == "__main__":
 
     ex = kalc()
     wn = Wn2()
+    wn1 = Wn3()
     ex.show()
     wn.show()
+    wn1.show()
 
     sys.exit(app.exec())
